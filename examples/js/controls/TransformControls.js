@@ -24,6 +24,7 @@ THREE.TransformControls = function ( camera, domElement ) {
 
 	defineProperty( "camera", camera );
 	defineProperty( "object", undefined );
+	defineProperty( "enabled", true );
 	defineProperty( "axis", null );
 	defineProperty( "mode", "translate" );
 	defineProperty( "translationSnap", null );
@@ -31,6 +32,9 @@ THREE.TransformControls = function ( camera, domElement ) {
 	defineProperty( "space", "world" );
 	defineProperty( "size", 1 );
 	defineProperty( "dragging", false );
+	defineProperty( "showX", true );
+	defineProperty( "showY", true );
+	defineProperty( "showZ", true );
 
 	var changeEvent = { type: "change" };
 	var mouseDownEvent = { type: "mouseDown" };
@@ -48,13 +52,16 @@ THREE.TransformControls = function ( camera, domElement ) {
 		X: new THREE.Vector3( 1, 0, 0 ),
 		Y: new THREE.Vector3( 0, 1, 0 ),
 		Z: new THREE.Vector3( 0, 0, 1 )
-	}
+	};
 	var _identityQuaternion = new THREE.Quaternion();
 	var _alignVector = new THREE.Vector3();
 
 	var pointStart = new THREE.Vector3();
 	var pointEnd = new THREE.Vector3();
+	var offset = new THREE.Vector3();
 	var rotationAxis = new THREE.Vector3();
+	var startNorm = new THREE.Vector3();
+	var endNorm = new THREE.Vector3();
 	var rotationAngle = 0;
 
 	var cameraPosition = new THREE.Vector3();
@@ -63,6 +70,7 @@ THREE.TransformControls = function ( camera, domElement ) {
 
 	var parentPosition = new THREE.Vector3();
 	var parentQuaternion = new THREE.Quaternion();
+	var parentQuaternionInv = new THREE.Quaternion();
 	var parentScale = new THREE.Vector3();
 
 	var worldPositionStart = new THREE.Vector3();
@@ -71,17 +79,17 @@ THREE.TransformControls = function ( camera, domElement ) {
 
 	var worldPosition = new THREE.Vector3();
 	var worldQuaternion = new THREE.Quaternion();
+	var worldQuaternionInv = new THREE.Quaternion();
 	var worldScale = new THREE.Vector3();
 
 	var eye = new THREE.Vector3();
 
-	var _positionStart = new THREE.Vector3();
-	var _quaternionStart = new THREE.Quaternion();
-	var _scaleStart = new THREE.Vector3();
+	var positionStart = new THREE.Vector3();
+	var quaternionStart = new THREE.Quaternion();
+	var scaleStart = new THREE.Vector3();
 
 	// TODO: remove properties unused in plane and gizmo
 
-	defineProperty( "parentQuaternion", parentQuaternion );
 	defineProperty( "worldPosition", worldPosition );
 	defineProperty( "worldPositionStart", worldPositionStart );
 	defineProperty( "worldQuaternion", worldQuaternion );
@@ -100,15 +108,11 @@ THREE.TransformControls = function ( camera, domElement ) {
 		domElement.addEventListener( "touchstart", onPointerDown, false );
 		domElement.addEventListener( "mousemove", onPointerHover, false );
 		domElement.addEventListener( "touchmove", onPointerHover, false );
-		domElement.addEventListener( "mousemove", onPointerMove, false );
 		domElement.addEventListener( "touchmove", onPointerMove, false );
-		domElement.addEventListener( "mouseup", onPointerUp, false );
-		domElement.addEventListener( "mouseleave", onPointerUp, false );
-		domElement.addEventListener( "mouseout", onPointerUp, false );
+		document.addEventListener( "mouseup", onPointerUp, false );
 		domElement.addEventListener( "touchend", onPointerUp, false );
 		domElement.addEventListener( "touchcancel", onPointerUp, false );
 		domElement.addEventListener( "touchleave", onPointerUp, false );
-		domElement.addEventListener( "contextmenu", onContext, false );
 
 	}
 
@@ -118,15 +122,11 @@ THREE.TransformControls = function ( camera, domElement ) {
 		domElement.removeEventListener( "touchstart", onPointerDown );
 		domElement.removeEventListener( "mousemove", onPointerHover );
 		domElement.removeEventListener( "touchmove", onPointerHover );
-		domElement.removeEventListener( "mousemove", onPointerMove );
 		domElement.removeEventListener( "touchmove", onPointerMove );
-		domElement.removeEventListener( "mouseup", onPointerUp );
-		domElement.removeEventListener( "mouseleave", onPointerUp );
-		domElement.removeEventListener( "mouseout", onPointerUp );
+		document.removeEventListener( "mouseup", onPointerUp );
 		domElement.removeEventListener( "touchend", onPointerUp );
 		domElement.removeEventListener( "touchcancel", onPointerUp );
 		domElement.removeEventListener( "touchleave", onPointerUp );
-		domElement.removeEventListener( "contextmenu", onContext );
 
 	};
 
@@ -168,6 +168,7 @@ THREE.TransformControls = function ( camera, domElement ) {
 					_plane[ propName ] = value;
 					_gizmo[ propName ] = value;
 
+					scope.dispatchEvent( { type: propName + "-changed", value: value } );
 					scope.dispatchEvent( changeEvent );
 
 				}
@@ -190,6 +191,9 @@ THREE.TransformControls = function ( camera, domElement ) {
 			this.object.updateMatrixWorld();
 			this.object.parent.matrixWorld.decompose( parentPosition, parentQuaternion, parentScale );
 			this.object.matrixWorld.decompose( worldPosition, worldQuaternion, worldScale );
+
+			parentQuaternionInv.copy( parentQuaternion ).inverse();
+			worldQuaternionInv.copy( worldQuaternion ).inverse();
 
 		}
 
@@ -228,7 +232,7 @@ THREE.TransformControls = function ( camera, domElement ) {
 
 		}
 
-	}
+	};
 
 	this.pointerDown = function( pointer ) {
 
@@ -267,15 +271,13 @@ THREE.TransformControls = function ( camera, domElement ) {
 				this.object.updateMatrixWorld();
 				this.object.parent.updateMatrixWorld();
 
-				_positionStart.copy( this.object.position );
-				_quaternionStart.copy( this.object.quaternion );
-				_scaleStart.copy( this.object.scale );
+				positionStart.copy( this.object.position );
+				quaternionStart.copy( this.object.quaternion );
+				scaleStart.copy( this.object.scale );
 
 				this.object.matrixWorld.decompose( worldPositionStart, worldQuaternionStart, worldScaleStart );
 
 				pointStart.copy( planeIntersect.point ).sub( worldPositionStart );
-
-				if ( space === 'local' ) pointStart.applyQuaternion( worldQuaternionStart.clone().inverse() );
 
 			}
 
@@ -285,7 +287,7 @@ THREE.TransformControls = function ( camera, domElement ) {
 
 		}
 
-	}
+	};
 
 	this.pointerMove = function( pointer ) {
 
@@ -314,29 +316,27 @@ THREE.TransformControls = function ( camera, domElement ) {
 
 		pointEnd.copy( planeIntersect.point ).sub( worldPositionStart );
 
-		if ( space === 'local' ) pointEnd.applyQuaternion( worldQuaternionStart.clone().inverse() );
-
 		if ( mode === 'translate' ) {
-
-			if ( axis.search( 'X' ) === -1 ) {
-				pointEnd.x = pointStart.x;
-			}
-			if ( axis.search( 'Y' ) === -1 ) {
-				pointEnd.y = pointStart.y;
-			}
-			if ( axis.search( 'Z' ) === -1 ) {
-				pointEnd.z = pointStart.z;
-			}
 
 			// Apply translate
 
-			if ( space === 'local' ) {
-				object.position.copy( pointEnd ).sub( pointStart ).applyQuaternion( _quaternionStart );
-			} else {
-				object.position.copy( pointEnd ).sub( pointStart );
+			offset.copy( pointEnd ).sub( pointStart );
+
+			if ( space === 'local' && axis !== 'XYZ' ) {
+				offset.applyQuaternion( worldQuaternionInv );
 			}
 
-			object.position.add( _positionStart );
+			if ( axis.indexOf( 'X' ) === -1 ) offset.x = 0;
+			if ( axis.indexOf( 'Y' ) === -1 ) offset.y = 0;
+			if ( axis.indexOf( 'Z' ) === -1 ) offset.z = 0;
+
+			if ( space === 'local' && axis !== 'XYZ') {
+				offset.applyQuaternion( quaternionStart ).divide( parentScale );
+			} else {
+				offset.applyQuaternion( parentQuaternionInv ).divide( parentScale );
+			}
+
+			object.position.copy( offset ).add( positionStart );
 
 			// Apply translation snap
 
@@ -344,7 +344,7 @@ THREE.TransformControls = function ( camera, domElement ) {
 
 				if ( space === 'local' ) {
 
-					object.position.applyQuaternion(_tempQuaternion.copy( _quaternionStart ).inverse() );
+					object.position.applyQuaternion(_tempQuaternion.copy( quaternionStart ).inverse() );
 
 					if ( axis.search( 'X' ) !== -1 ) {
 						object.position.x = Math.round( object.position.x / this.translationSnap ) * this.translationSnap;
@@ -358,7 +358,7 @@ THREE.TransformControls = function ( camera, domElement ) {
 						object.position.z = Math.round( object.position.z / this.translationSnap ) * this.translationSnap;
 					}
 
-					object.position.applyQuaternion( _quaternionStart );
+					object.position.applyQuaternion( quaternionStart );
 
 				}
 
@@ -416,41 +416,40 @@ THREE.TransformControls = function ( camera, domElement ) {
 
 			// Apply scale
 
-			object.scale.copy( _scaleStart ).multiply( _tempVector );
+			object.scale.copy( scaleStart ).multiply( _tempVector );
 
 		} else if ( mode === 'rotate' ) {
 
+			offset.copy( pointEnd ).sub( pointStart );
+
 			var ROTATION_SPEED = 20 / worldPosition.distanceTo( _tempVector.setFromMatrixPosition( this.camera.matrixWorld ) );
-
-			var quaternion = this.space === "local" ? worldQuaternion : _identityQuaternion;
-
-			var unit = _unit[ axis ];
 
 			if ( axis === 'E' ) {
 
-				_tempVector.copy( pointEnd ).cross( pointStart );
 				rotationAxis.copy( eye );
-				rotationAngle = pointEnd.angleTo( pointStart ) * ( _tempVector.dot( eye ) < 0 ? 1 : -1 );
+				rotationAngle = pointEnd.angleTo( pointStart );
+
+				startNorm.copy( pointStart ).normalize();
+				endNorm.copy( pointEnd ).normalize();
+
+				rotationAngle *= ( endNorm.cross( startNorm ).dot( eye ) < 0 ? 1 : -1);
 
 			} else if ( axis === 'XYZE' ) {
 
-				_tempVector.copy( pointEnd ).sub( pointStart ).cross( eye ).normalize();
-				rotationAxis.copy( _tempVector );
-				rotationAngle = pointEnd.sub( pointStart ).dot( _tempVector.cross( eye ) ) * ROTATION_SPEED;
+				rotationAxis.copy( offset ).cross( eye ).normalize(  );
+				rotationAngle = offset.dot( _tempVector.copy( rotationAxis ).cross( this.eye ) ) * ROTATION_SPEED;
 
 			} else if ( axis === 'X' || axis === 'Y' || axis === 'Z' ) {
 
-				_alignVector.copy( unit ).applyQuaternion( quaternion );
+				rotationAxis.copy( _unit[ axis ] );
 
-				rotationAxis.copy( unit );
+				_tempVector.copy( _unit[ axis ] );
 
-				_tempVector = unit.clone();
-				_tempVector2 = pointEnd.clone().sub( pointStart );
 				if ( space === 'local' ) {
-					_tempVector.applyQuaternion( quaternion );
-					_tempVector2.applyQuaternion( worldQuaternionStart );
+					_tempVector.applyQuaternion( worldQuaternion );
 				}
-				rotationAngle = _tempVector2.dot( _tempVector.cross( eye ).normalize() ) * ROTATION_SPEED;
+
+				rotationAngle = offset.dot( _tempVector.cross( eye ).normalize() ) * ROTATION_SPEED;
 
 			}
 
@@ -461,16 +460,16 @@ THREE.TransformControls = function ( camera, domElement ) {
 			this.rotationAngle = rotationAngle;
 
 			// Apply rotate
+			if ( space === 'local' && axis !== 'E' && axis !== 'XYZE' ) {
 
-			if ( space === 'local' ) {
-
-				object.quaternion.copy( _quaternionStart );
-				object.quaternion.multiply( _tempQuaternion.setFromAxisAngle( rotationAxis, rotationAngle ) );
+				object.quaternion.copy( quaternionStart );
+				object.quaternion.multiply( _tempQuaternion.setFromAxisAngle( rotationAxis, rotationAngle ) ).normalize();
 
 			} else {
 
+				rotationAxis.applyQuaternion( parentQuaternionInv );
 				object.quaternion.copy( _tempQuaternion.setFromAxisAngle( rotationAxis, rotationAngle ) );
-				object.quaternion.multiply( _quaternionStart );
+				object.quaternion.multiply( quaternionStart ).normalize();
 
 			}
 
@@ -479,7 +478,7 @@ THREE.TransformControls = function ( camera, domElement ) {
 		this.dispatchEvent( changeEvent );
 		this.dispatchEvent( objectChangeEvent );
 
-	}
+	};
 
 	this.pointerUp = function( pointer ) {
 
@@ -496,7 +495,7 @@ THREE.TransformControls = function ( camera, domElement ) {
 
 		if ( pointer.button === undefined ) this.axis = null;
 
-	}
+	};
 
 	// normalize mouse / touch pointer and remap {x,y} to view space.
 
@@ -510,21 +509,15 @@ THREE.TransformControls = function ( camera, domElement ) {
 			x: ( pointer.clientX - rect.left ) / rect.width * 2 - 1,
 			y: - ( pointer.clientY - rect.top ) / rect.height * 2 + 1,
 			button: event.button
-		}
+		};
 
 	}
 
 	// mouse / touch event handlers
 
-	function onContext( event ) {
-
-		event.preventDefault();
-
-	}
-
 	function onPointerHover( event ) {
 
-		// event.preventDefault();
+		if ( !scope.enabled ) return;
 
 		scope.pointerHover( getPointer( event ) );
 
@@ -532,8 +525,9 @@ THREE.TransformControls = function ( camera, domElement ) {
 
 	function onPointerDown( event ) {
 
-		event.preventDefault();
-		event.stopPropagation();
+		if ( !scope.enabled ) return;
+
+		document.addEventListener( "mousemove", onPointerMove, false );
 
 		scope.pointerHover( getPointer( event ) );
 		scope.pointerDown( getPointer( event ) );
@@ -542,8 +536,7 @@ THREE.TransformControls = function ( camera, domElement ) {
 
 	function onPointerMove( event ) {
 
-		event.preventDefault();
-		event.stopPropagation();
+		if ( !scope.enabled ) return;
 
 		scope.pointerMove( getPointer( event ) );
 
@@ -551,7 +544,9 @@ THREE.TransformControls = function ( camera, domElement ) {
 
 	function onPointerUp( event ) {
 
-		event.preventDefault(); // Prevent MouseEvent on mobile
+		if ( !scope.enabled ) return;
+
+		document.removeEventListener( "mousemove", onPointerMove, false );
 
 		scope.pointerUp( getPointer( event ) );
 
@@ -599,7 +594,7 @@ THREE.TransformControls = function ( camera, domElement ) {
 
 		console.warn( 'THREE.TransformControls: update function has been depricated.' );
 
-	}
+	};
 
 };
 
@@ -684,9 +679,6 @@ THREE.TransformControlsGizmo = function () {
 
 	var matLineMagenta = gizmoLineMaterial.clone();
 	matLineMagenta.color.set( 0xff00ff );
-
-	var matLineBlue = gizmoLineMaterial.clone();
-	matLineBlue.color.set( 0x0000ff );
 
 	var matLineYellow = gizmoLineMaterial.clone();
 	matLineYellow.color.set( 0xffff00 );
@@ -1193,6 +1185,7 @@ THREE.TransformControlsGizmo = function () {
 				var PLANE_HIDE_TRESHOLD = 0.2;
 				var AXIS_FLIP_TRESHOLD = -0.4;
 
+
 				if ( handle.name === 'X' || handle.name === 'XYZX' ) {
 					if ( Math.abs( alignVector.copy( unitX ).applyQuaternion( quaternion ).dot( this.eye ) ) > AXIS_HIDE_TRESHOLD ) {
 						handle.scale.set( 1e-10, 1e-10, 1e-10 );
@@ -1307,6 +1300,12 @@ THREE.TransformControlsGizmo = function () {
 
 			}
 
+			// Hide disabled axes
+			handle.visible = handle.visible && ( handle.name.indexOf( "X" ) === -1 || this.showX );
+			handle.visible = handle.visible && ( handle.name.indexOf( "Y" ) === -1 || this.showY );
+			handle.visible = handle.visible && ( handle.name.indexOf( "Z" ) === -1 || this.showZ );
+			handle.visible = handle.visible && ( handle.name.indexOf( "E" ) === -1 || ( this.showX && this.showY && this.showZ ) );
+
 			// highlight selected axis
 
 			handle.material._opacity = handle.material._opacity || handle.material.opacity;
@@ -1315,7 +1314,12 @@ THREE.TransformControlsGizmo = function () {
 			handle.material.color.copy( handle.material._color );
 			handle.material.opacity = handle.material._opacity;
 
-			if ( this.axis ) {
+			if ( !this.enabled ) {
+
+				handle.material.opacity *= 0.5;
+				handle.material.color.lerp( new THREE.Color( 1, 1, 1 ), 0.5 );
+
+			} else if ( this.axis ) {
 
 				if ( handle.name === this.axis ) {
 
@@ -1329,7 +1333,8 @@ THREE.TransformControlsGizmo = function () {
 
 				} else {
 
-					handle.material.opacity *= 0.05;
+					handle.material.opacity *= 0.25;
+					handle.material.color.lerp( new THREE.Color( 1, 1, 1 ), 0.5 );
 
 				}
 
